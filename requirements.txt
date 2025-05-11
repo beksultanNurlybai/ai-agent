@@ -1,0 +1,9 @@
+unstructured[pdf]
+langchain
+langchain_huggingface
+langchain-qdrant
+qdrant-client
+google-genai
+tiktoken
+pymongo
+python-dotenv
