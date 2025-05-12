@@ -29,6 +29,7 @@ GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
 MODEL_NAME = "gemini-2.5-flash-preview-04-17"
 SMALL_MODEL_NAME = "gemini-2.0-flash-lite"
+CONTEXT_WINDOW_THRESHOLD = 100_000
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -98,7 +99,6 @@ def parse_questions(question_text: str) -> List[Dict]:
             'options': options,
             'answer': answer
         })
-
     return questions
 
 def generate_questions(course_content: List[Dict]) -> List[Dict]:
@@ -130,7 +130,7 @@ def generate_questions(course_content: List[Dict]) -> List[Dict]:
         response = get_small_model_response(prompt_text + module['content'])
         questions = parse_questions(response)
         module['questions'] = questions
-        
+    
     return course_content
 
 
@@ -245,16 +245,17 @@ def get_summary(chunks_summaries: List[str]) -> str:
 
     Text chunk:\n"""
     encoding = tiktoken.get_encoding('cl100k_base')
+    
     def recursive_summary(summaries: List[str]) -> str:
         token_num = 0
         for summary in summaries:
             token_num += len(encoding.encode(summary))
         
-        if token_num < 100_000:
+        if token_num < CONTEXT_WINDOW_THRESHOLD:
             return '\n'.join(summaries)
         
-        new_summaries = [get_small_model_response(prompt_text + ''.join(summaries[i-4, i])) for i in range(4, len(summaries), 4)]
-        recursive_summary(new_summaries)
+        new_summaries = [get_small_model_response(prompt_text + ''.join(summaries[i-4: i])) for i in range(4, len(summaries), 4)]
+        return recursive_summary(new_summaries)
     
     return recursive_summary(chunks_summaries)
 
@@ -402,7 +403,7 @@ def generate_course(user: str, course: str, dir_path: str):
     chunks_summaries = summarize(chunks)
     print("Summary is generated.")
     # save_summary(chunks_summaries)
-    
+
     store_chunks(chunks, chunks_summaries, user, course)
     print("Documents saved in a vector database.")
 
