@@ -422,5 +422,5 @@ def generate_course(user: str, course: str, dir_path: str):
 if __name__ == '__main__':
     user = 'Beksultan'
     course = 'Attention'
-    dir_path = 'resource'
+    dir_path = 'uploaded_files'
     generate_course(user, course, dir_path)
