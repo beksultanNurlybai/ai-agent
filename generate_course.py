@@ -7,11 +7,12 @@ from typing import List, Dict, Tuple
 from google import genai
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain.schema.document import Document
+from langchain_community.document_loaders import PyMuPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.prompts import ChatPromptTemplate
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Filter, FieldCondition, MatchValue
-from unstructured.partition.pdf import partition_pdf
 from pymongo import MongoClient
 import tiktoken
 
@@ -217,9 +218,7 @@ def generate_course_summary(toc: List[Dict]) -> str:
         "TOC of the learning course:\n"
     )
     toc_text = '\n'.join(f'Module {module['number']}: {module['title']}\nSummary: {module['summary']}' for module in toc)
-    print(prompt_text + toc_text)
     response = get_model_response(prompt_text + toc_text)
-    print(response)
     return response
 
 
@@ -378,39 +377,33 @@ def summarize_chunks(chunks: List[str]) -> List[str]:
 def parse_files(dir_path: str) -> Tuple[List[str], int]:
     file_paths = glob.glob(os.path.join(dir_path, '*.pdf')) + glob.glob(os.path.join(dir_path, '*.PDF'))
     if len(file_paths) == 0:
-        print('there is no files.')
+        print('There are no files.')
         return [], 0
-    
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=5000,
+        chunk_overlap=1000,
+        separators=["\n\n", "\n", ".", " ", ""]
+    )
+
     chunks = []
     for file_path in file_paths:
-        chunks += partition_pdf(
-            filename=file_path,
-            infer_table_structure=True,
-            strategy='hi_res',
-            chunking_strategy='by_title',
-            max_characters=10000,
-            combine_text_under_n_chars=2000,
-            new_after_n_chars=6000)
-    
+        try:
+            documents = PyMuPDFLoader(file_path).load()
+            file_text = '\n'.join(doc.page_content for doc in documents)
+            chunks += text_splitter.split_text(file_text)
+        except Exception as e:
+            print(f"Error loading {file_path}: {e}")
+
     encoding = tiktoken.get_encoding('cl100k_base')
     token_num = 0
-    texts = []
     for chunk in chunks:
-        text = ''
-        for element in chunk.metadata.orig_elements:
-            if 'Image' in str(type(element)):
-                continue
-            elif 'Table' in str(type(element)):
-                text += element.metadata.text_as_html + '\n'
-            else:
-                text += element.text + '\n'
-        token_num += len(encoding.encode(text))
-        texts.append(text)
-    
-    module_num = int((token_num / 1000)**0.5) + 2
-    if module_num > 30:
-        module_num = 30
-    return texts, module_num
+        token_num += len(encoding.encode(chunk))
+
+    module_num = int((token_num / 1000) ** 0.5) + 2
+    module_num = min(module_num, 30)
+
+    return chunks, module_num
 
 
 def generate_course(user: str, course: str, dir_path: str):
