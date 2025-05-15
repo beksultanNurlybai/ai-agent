@@ -15,14 +15,14 @@ from unstructured.partition.pdf import partition_pdf
 from pymongo import MongoClient
 import tiktoken
 
-from utils import save_summary, save_toc_and_course_content
+from utils import save_course_content
 
 
 load_dotenv()
 
 MONGO_URI = os.getenv('MONGO_URI')
-MONGO_DB_NAME = os.getenv('MONGO_DB_NAME')
 QDRANT_URL = os.getenv('QDRANT_URL')
+MONGO_DB_NAME = os.getenv('MONGO_DB_NAME')
 QDRANT_API_KEY = os.getenv('QDRANT_API_KEY')
 COLLECTION_NAME = os.getenv('COLLECTION_NAME')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
@@ -51,7 +51,7 @@ def get_embedding_function():
     return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 
-def store_course(modules: List[Dict]):
+def store_course(modules: List[Dict], course_summary: str):
     if not modules:
         print("No modules were parsed. Skipping DB insertion.")
         return []
@@ -63,6 +63,7 @@ def store_course(modules: List[Dict]):
         course_collection.insert_one({
             'user': user,
             'course': course,
+            'summary': course_summary,
             'modules': modules,
         })
     except Exception as e:
@@ -204,6 +205,24 @@ def generate_course_content(toc: List[Dict], user: str, course: str, k: int = 10
     return toc
 
 
+def generate_course_summary(toc: List[Dict]) -> str:
+    prompt_text = (
+        "You are an expert instructional designer tasked with generating a summary for a learning course. "
+        "Using the table of contents of the learning course, create a summary for the course.\n\n"
+        "**Constraints:**\n"
+        "* Respond only with the summary, no additionnal comment. "
+        "Do not start your message by saying \"Here is a summary\" or anything like that. "
+        "Just give the summary as it is.\n"
+        "* Summary is a small paragraph that are consisted of ~40 words.\n\n"
+        "TOC of the learning course:\n"
+    )
+    toc_text = '\n'.join(f'Module {module['number']}: {module['title']}\nSummary: {module['summary']}' for module in toc)
+    print(prompt_text + toc_text)
+    response = get_model_response(prompt_text + toc_text)
+    print(response)
+    return response
+
+
 def parse_module_summaries(text: str) -> List[Dict]:
     modules = []
     lines = text.splitlines()
@@ -234,7 +253,7 @@ def parse_module_summaries(text: str) -> List[Dict]:
 
     return modules
 
-def get_summary(chunks_summaries: List[str]) -> str:
+def get_files_summary(chunks_summaries: List[str]) -> str:
     prompt_text = """
     You are an assistant tasked with summarizing text.
     Give a concise summary of the text.
@@ -282,7 +301,7 @@ def generate_toc(chunks_summaries: List[str], module_num: int) -> List[Dict]:
         "Keywords: consensus mechanisms, distributed ledger\n\n"
         "Summary:\n{summary}"
     )
-    summary = get_summary(chunks_summaries)
+    summary = get_files_summary(chunks_summaries)
     prompt = ChatPromptTemplate.from_template(prompt_template).format(
                 min_module=int(module_num*0.7),
                 max_module=module_num,
@@ -342,7 +361,7 @@ def store_chunks(chunks: List[str], chunks_summaries: List[str], user: str, cour
         client.close()
 
 
-def summarize(chunks: List[str]) -> List[str]:
+def summarize_chunks(chunks: List[str]) -> List[str]:
     prompt_text = """
     You are an assistant tasked with summarizing text.
     Give a concise summary of the text.
@@ -368,7 +387,6 @@ def parse_files(dir_path: str) -> Tuple[List[str], int]:
             filename=file_path,
             infer_table_structure=True,
             strategy='hi_res',
-            languages=['eng', 'rus', 'kaz'],
             chunking_strategy='by_title',
             max_characters=10000,
             combine_text_under_n_chars=2000,
@@ -396,31 +414,38 @@ def parse_files(dir_path: str) -> Tuple[List[str], int]:
 
 
 def generate_course(user: str, course: str, dir_path: str):
-    print("Files are being processed...")
+    print("Course generation is started...")
+    
     chunks, module_num = parse_files(dir_path)
     print("Files are loaded.")
 
-    chunks_summaries = summarize(chunks)
-    print("Summary is generated.")
-    # save_summary(chunks_summaries)
+    chunks_summaries = summarize_chunks(chunks)
+    print("Chunks are summarized.")
 
     store_chunks(chunks, chunks_summaries, user, course)
-    print("Documents saved in a vector database.")
-
+    print("Chunks saved in a database.")
+    
     toc = generate_toc(chunks_summaries, module_num)
     print("Table of contents is generated.")
 
+    course_summary = generate_course_summary(toc)
+    print("Summary of course is generated.")
+
     course_content = generate_course_content(toc, user, course)
     print("Content of the course is generated.")
-    # save_toc_and_course_content(course_content)
+    # save_course_content(course_content, course_summary, course)
 
     course_content = generate_questions(course_content)
     print("Questions of the course are generated.")
-    store_course(course_content)
+    
+    store_course(course_content, course_summary)
+    print("Course saved in a database.")
+
+    print("Course are successfuly generated.")
 
 
 if __name__ == '__main__':
-    user = 'Beksultan'
-    course = 'Attention'
-    dir_path = 'uploaded_files'
+    user = 'Tester'
+    course = 'Test Course'
+    dir_path = 'resource'
     generate_course(user, course, dir_path)

@@ -1,5 +1,7 @@
 unstructured[pdf]
 langchain
+langchain_community
+langchain-google-genai
 langchain_huggingface
 langchain-qdrant
 qdrant-client
