@@ -1,3 +1,4 @@
+unstructured[pdf]
 langchain
 langchain_community
 langchain-google-genai
@@ -6,6 +7,7 @@ langchain-qdrant
 qdrant-client
 google-genai
 tiktoken
-pymupdf
 pymongo
 python-dotenv
+fastapi[all]
+pydantic

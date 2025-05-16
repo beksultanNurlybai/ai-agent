@@ -24,7 +24,7 @@ def delete_course(user: str, course: str):
         )
         client.delete(collection_name=COLLECTION_NAME, points_selector=qdrant_filter)
     except Exception as e:
-        print('Error: cannot delete chunks in a vector database' + e)
+        print('Error: cannot delete chunks in a vector database:', e)
     finally:
         client.close()
     
@@ -47,5 +47,5 @@ def delete_course(user: str, course: str):
 
 if __name__ == '__main__':
     user = 'Beksultan'
-    course = 'Attention'
+    course = 'Transformers and RAG'
     delete_course(user, course)
