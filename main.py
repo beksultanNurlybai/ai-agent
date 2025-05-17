@@ -1,48 +1,65 @@
 import os
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from pymongo import MongoClient
+from typing import List
+from uuid import uuid4
+from fastapi import FastAPI, HTTPException, Form, File, UploadFile
 
 from generate_course import generate_course
-from delete_course import delete_course
+from delete_course import delete_course as del_course
 
 
-load_dotenv()
-
-MONGO_URI = os.getenv('MONGO_URI')
-MONGO_DB_NAME = os.getenv('MONGO_DB_NAME')
+UPLOAD_FOLDER = "uploaded_files"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 app = FastAPI(title="RAG Course API")
 
-class CourseRequest(BaseModel):
-    title: str
-    creator_username: str
-
-
-@app.post("/generate-course")
-async def generate_course_endpoint(request: CourseRequest):
+@app.post("/generate")
+async def create_course(
+    title: str = Form(...),
+    owner: str = Form(...),
+    files: List[UploadFile] = File(...)
+):
+    files_paths = []
     try:
-        mongo_client = MongoClient(MONGO_URI)
-        mongo_db = mongo_client[MONGO_DB_NAME]
-        course_collection = mongo_db['courses']
+        for file in files:
+            ext = file.filename.split(".")[-1]
+            if ext != 'pdf':
+                return HTTPException(status_code=415, detail='Files\' extention must be pdf.')
+            
+            unique_id = str(uuid4())[:8]
+            safe_title = title.replace(" ", "_")
+            new_filename = f"{safe_title}_{unique_id}.{ext}"
+            file_path = os.path.join(UPLOAD_FOLDER, new_filename)
 
-        record = course_collection.find_one({
-            'title': request.title,
-            'creator_username': request.creator_username
-        })
-        files_paths = ['uploaded_files/' + file['stored_filename'] for file in record['files']]
-
-        generate_course(request.creator_username, request.title, files_paths)
-        return {"message": f'Course "{request.title}" has been successfully generated.'}
+            with open(file_path, "wb") as f:
+                content = await file.read()
+                f.write(content)
+            
+            files_paths.append(file_path)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.delete("/delete-course")
-async def delete_course_endpoint(request: CourseRequest):
+        HTTPException(status_code=500, detail=str(e))
+    
+    if len(files_paths) == 0:
+        HTTPException(status_code=400, detail='PDF files are not uploaded.')
+    
     try:
-        delete_course(request.creator_username, request.title)
-        return {"message": f'Course "{request.title}" has been successfully deleted.'}
+        generate_course(owner, title, files_paths)
+    except Exception as e:
+        HTTPException(status_code=500, detail=str(e))
+    finally:
+        for file_path in files_paths:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
+    return {"message": f'Course "{title}" has been successfully generated.'}
+
+
+@app.delete("/delete")
+async def delete_course(
+    title: str = Form(...),
+    owner: str = Form(...)
+):
+    try:
+        del_course(owner, title)
+        return {"message": f'Course "{title}" has been successfully deleted.'}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -59,15 +59,12 @@ def store_course(modules: List[Dict], course_summary: str):
         mongo_client = MongoClient(MONGO_URI)
         mongo_db = mongo_client[MONGO_DB_NAME]
         course_collection = mongo_db['courses']
-        course_collection.update_one(
-            {'title': course, 'creator_username': user},
-            {
-                '$set': {
-                    'description': course_summary,
-                    'modules': modules
-                }
-            },
-        )
+        course_collection.insert_one({
+            'title': course,
+            'creator_username': user,
+            'description': course_summary,
+            'modules': modules,
+        })
     except Exception as e:
         print('Error: cannot insert course data in a database:', e)
     finally:
