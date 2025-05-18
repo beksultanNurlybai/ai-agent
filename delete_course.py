@@ -33,7 +33,7 @@ def delete_course(user: str, course: str):
         mongo_db = mongo_client['edtech']
 
         course_collection = mongo_db['courses']
-        course_collection.delete_one({'user': user, 'course': course})
+        course_collection.delete_one({'creator_username': user, 'title': course})
 
         chunks_collection = mongo_db['chunks']
         chunks_collection.delete_many({'user': user, 'course': course})

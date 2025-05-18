@@ -2,6 +2,7 @@ import os
 from typing import List
 from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Form, File, UploadFile
+from sse_starlette.sse import EventSourceResponse
 
 from generate_course import generate_course
 from delete_course import delete_course as del_course
@@ -17,6 +18,7 @@ async def create_course(
     title: str = Form(...),
     owner: str = Form(...),
     files: List[UploadFile] = File(...)
+    
 ):
     files_paths = []
     try:
@@ -41,16 +43,18 @@ async def create_course(
     if len(files_paths) == 0:
         HTTPException(status_code=400, detail='PDF files are not uploaded.')
     
-    try:
-        generate_course(owner, title, files_paths)
-    except Exception as e:
-        HTTPException(status_code=500, detail=str(e))
-    finally:
-        for file_path in files_paths:
-            if os.path.exists(file_path):
-                os.remove(file_path)
+    async def event_generator():
+        try:
+            for message in generate_course(owner, title, files_paths):
+                yield message
+        except Exception as e:
+            HTTPException(status_code=500, detail=str(e))
+        finally:
+            for file_path in files_paths:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
 
-    return {"message": f'Course "{title}" has been successfully generated.'}
+    return EventSourceResponse(event_generator())
 
 
 @app.delete("/delete")
@@ -60,6 +64,6 @@ async def delete_course(
 ):
     try:
         del_course(owner, title)
-        return {"message": f'Course "{title}" has been successfully deleted.'}
+        return {'message': f'Course "{title}" has been successfully deleted.'}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

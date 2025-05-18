@@ -1,6 +1,6 @@
 import os
-import glob
 import re
+from enum import Enum
 from uuid import uuid4
 from dotenv import load_dotenv
 from typing import List, Dict, Tuple
@@ -50,7 +50,11 @@ def get_embedding_function():
     return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 
-def store_course(modules: List[Dict], course_summary: str):
+class CourseStatus(str, Enum):
+    PUBLIC = "public"
+    PRIVATE = "private"
+
+def store_course(modules: List[Dict], course_summary: str, user: str, course: str):
     if not modules:
         print("No modules were parsed. Skipping DB insertion.")
         return []
@@ -64,6 +68,7 @@ def store_course(modules: List[Dict], course_summary: str):
             'creator_username': user,
             'description': course_summary,
             'modules': modules,
+            'status': CourseStatus.PRIVATE
         })
     except Exception as e:
         print('Error: cannot insert course data in a database:', e)
@@ -402,40 +407,36 @@ def parse_files(files_paths: List[str]) -> Tuple[List[str], int]:
         token_num += len(encoding.encode(text))
         texts.append(text)
     
-    module_num = int((token_num / 1000)**0.5) + 2
-    if module_num > 30:
-        module_num = 30
+    module_num = min(int((token_num / 1000)**0.5) + 2, 30)
     return texts, module_num
 
 
 def generate_course(user: str, course: str, files_paths: List[str]):
-    print("Course generation is started...")
+    yield {'data': 'Course generation is started...'}
     
     chunks, module_num = parse_files(files_paths)
-    print("Files are loaded.")
+    yield {'data': 'Files are loaded.'}
 
     chunks_summaries = summarize_chunks(chunks)
-    print("Chunks are summarized.")
+    yield {'data': 'Chunks are summarized.'}
 
     store_chunks(chunks, chunks_summaries, user, course)
-    print("Chunks saved in a database.")
+    yield {'data': 'Chunks saved in a database.'}
     
     toc = generate_toc(chunks_summaries, module_num)
-    print("Table of contents is generated.")
+    yield {'data': 'Table of contents is generated.'}
 
     course_summary = generate_course_summary(toc)
-    print("Summary of course is generated.")
+    yield {'data': 'Summary of course is generated.'}
 
     course_content = generate_course_content(toc, user, course)
-    print("Content of the course is generated.")
+    yield {'data': 'Content of the course is generated.'}
 
     course_content = generate_questions(course_content)
-    print("Questions of the course are generated.")
+    yield {'data': 'Questions of the course are generated.'}
     
-    store_course(course_content, course_summary)
-    print("Course saved in a database.")
-
-    print("Course are successfuly generated.")
+    store_course(course_content, course_summary, user, course)
+    yield {'data': 'Course are successfuly generated.'}
 
 
 if __name__ == '__main__':

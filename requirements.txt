@@ -10,4 +10,4 @@ tiktoken
 pymongo
 python-dotenv
 fastapi[all]
-pydantic
+sse-starlette
