@@ -22,10 +22,11 @@ QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 COLLECTION_NAME = os.getenv("COLLECTION_NAME")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+sessions: Dict[str, Dict[str, Any]] = {}
+
 
 class ChatBot:
     def __init__(self):
-        self.sessions: Dict[str, Dict[str, Any]] = {}
         self.llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", google_api_key=GEMINI_API_KEY)
         self.embedding = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
@@ -37,12 +38,12 @@ class ChatBot:
         )
     
     def _get_history_for_session(self, session_id: str) -> BaseChatMessageHistory:
-        if session_id not in self.sessions:
-            self.sessions[session_id] = {"history": ChatMessageHistory()}
-        return self.sessions[session_id]["history"]
+        if session_id not in sessions:
+            sessions[session_id] = {"history": ChatMessageHistory()}
+        return sessions[session_id]["history"]
 
     def create_session(self, session_id: str, user: str, course: str) -> None:
-        self.sessions[session_id] = {
+        sessions[session_id] = {
             "user": user,
             "course": course,
             "history": ChatMessageHistory()
@@ -82,8 +83,8 @@ class ChatBot:
             mongo_client.close()
     
     def process_message(self, session_id: str, message: str) -> str:
-        user = self.sessions.get(session_id, {}).get("user", "unknown")
-        course = self.sessions.get(session_id, {}).get("course", "unknown")
+        user = sessions.get(session_id, {}).get("user", "unknown")
+        course = sessions.get(session_id, {}).get("course", "unknown")
 
         context = self._retrieve_context(message, user, course)
 
@@ -101,8 +102,8 @@ class ChatBot:
         return response.content
 
     def close_session(self, session_id: str) -> None:
-        if session_id in self.sessions:
-            del self.sessions[session_id]
+        if session_id in sessions:
+            del sessions[session_id]
 
 
 if __name__ == "__main__":

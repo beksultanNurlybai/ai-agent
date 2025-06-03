@@ -3,6 +3,7 @@ from typing import List
 from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Form, File, UploadFile
 from sse_starlette.sse import EventSourceResponse
+from chatbot import ChatBot, sessions
 
 from generate_course import generate_course
 from delete_course import delete_course as del_course
@@ -67,3 +68,33 @@ async def delete_course(
         return {'message': f'Course "{title}" has been successfully deleted.'}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+bot = ChatBot()
+
+@app.post("/start-session")
+def start_session(
+    title: str = Form(...),
+    owner: str = Form(...)
+):
+    session_id = str(uuid4())
+    bot.create_session(session_id, user=owner, course=title)
+    return {"session_id": session_id}
+
+
+@app.post("/send-message")
+def send_message(
+    session_id: str = Form(...),
+    message: str = Form(...)
+):
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    response = bot.process_message(session_id, message)
+    return {"response": response}
+
+
+@app.post("/close-session")
+def close_session(session_id: str = Form(...)):
+    bot.close_session(session_id)
+    return {"message": "Session closed"}
+
