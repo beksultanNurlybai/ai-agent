@@ -25,19 +25,18 @@ def get_model_response(content: str) -> str:
     return response.text
 
 
-def save_quiz_attempt(question_ids: List[int], quiz_attempt: Dict) -> str:
+def save_quiz(question_ids: List[int], quiz_attempt: Dict) -> str:
     try:
         mongo_client = MongoClient(MONGO_URI)
         mongo_db = mongo_client[MONGO_DB_NAME]
-        quiz_attempts_collection = mongo_db['quiz_attempts']
+        quizzes_collection = mongo_db['quizzes']
 
-        answers = [{'question_index': question_id} for question_id in question_ids]
-        result = quiz_attempts_collection.insert_one({
+        quizzes_collection.delete_one({'course_id': quiz_attempt['course_id'], 'user_id': quiz_attempt['user_id']})
+
+        result = quizzes_collection.insert_one({
             'course_id': quiz_attempt['course_id'],
             'user_id': quiz_attempt['user_id'],
-            # 'attempt_number': quiz_attempt['attempt_number'] + 1,
-            'is_completed': False,
-            'answers': answers
+            'questions': question_ids
         })
         return result.inserted_id
     except Exception as e:
@@ -93,7 +92,8 @@ def generate_module_quiz(attempt_id: str):
             question_id = randint(0, 19)
             if question_id not in result:
                 result.append(question_id)
-        return save_quiz_attempt(result, quiz_attempt)
+        result = sorted(result)
+        return save_quiz(result, quiz_attempt)
 
     
     incorrecty_answered_questions_text = ''
@@ -115,7 +115,7 @@ def generate_module_quiz(attempt_id: str):
     response = get_model_response(prompt)
     result = response.split(', ')
     result = [int(num) for num in result]
-    return save_quiz_attempt(result, quiz_attempt)
+    return save_quiz(result, quiz_attempt)
 
 
 if __name__ == '__main__':

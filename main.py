@@ -75,15 +75,15 @@ async def delete_course(
 async def generate_module_quiz(
     attempt_id: str = Form(...)
 ):
-    new_attempt_id = None
+    quiz_id = None
     try:
-        new_attempt_id = gen_module_quiz(attempt_id)
+        quiz_id = gen_module_quiz(attempt_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-    if new_attempt_id is None:
+    if quiz_id is None:
         raise HTTPException(status_code=404, detail='Invalid attempt_id.')
-    return {'message': 'New quiz attempt has been successfully generated.', 'new_attempt_id': str(new_attempt_id)}
+    return {'message': 'New quiz has been successfully generated.', 'quiz_id': str(quiz_id)}
 
 
 bot = ChatBot()
