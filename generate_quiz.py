@@ -7,6 +7,8 @@ from langchain.prompts import ChatPromptTemplate
 from pymongo import MongoClient
 from random import randint
 
+from generate_course import parse_questions
+
 load_dotenv()
 
 
@@ -43,7 +45,6 @@ def save_quiz(question_ids: List[int], quiz_attempt: Dict) -> str:
         print('Error: cannot insert quiz attempt in a database:', e)
     finally:
         mongo_client.close()
-
 
 def generate_module_quiz(attempt_id: str):
     prompt_template = (
@@ -118,6 +119,168 @@ def generate_module_quiz(attempt_id: str):
     return save_quiz(result, quiz_attempt)
 
 
-if __name__ == '__main__':
-    print(generate_module_quiz('683f680afa42b1137c5ab28e'))
+def round_preserving_sum(arr: List[float]) -> List[int]:
+    floor_arr = [int(x) for x in arr]
+    diff = round(sum(arr)) - sum(floor_arr)
+    
+    frac_parts = sorted(
+        [(i, arr[i] - floor_arr[i]) for i in range(len(arr))],
+        key=lambda x: -x[1]
+    )
+    
+    for i in range(diff):
+        idx = frac_parts[i][0]
+        floor_arr[idx] += 1
 
+    return floor_arr
+
+def generate_final_quiz(course_id: str, user_id: str):
+    result = []
+    course = None
+    attempts = None
+    mistake_questions: List[List[int]] = []
+    module_question_lens: List[int] = []
+    question_len = 30
+    
+    try:
+        mongo_client = MongoClient(MONGO_URI)
+        mongo_db = mongo_client[MONGO_DB_NAME]
+
+        courses_collection = mongo_db['courses']
+        course = courses_collection.find_one({'_id': ObjectId(course_id)})
+        
+        quiz_attempts_collection = mongo_db['quiz_attempts']
+        mistake_scores = []
+        for i in range(len(course['modules'])):
+            attempts = list(quiz_attempts_collection.find({'course_id': course_id, 'user_id': user_id, 'module_number': i+1}))
+            if attempts == []:
+                return None
+            
+            mistake_module_questions = []
+            mistake_score = 0
+            for attempt in attempts:
+                for answer in attempt['answers']:
+                    if not answer['is_correct']:
+                        mistake_score += 1
+                        if answer['question_index'] not in mistake_module_questions:
+                            mistake_module_questions.append(answer['question_index'])
+            
+            mistake_questions.append(mistake_module_questions)
+            mistake_scores.append(mistake_score / len(attempts))
+        
+        mistake_scores_sum = sum(mistake_scores)
+        temp = mistake_scores_sum / len(mistake_scores)
+        for i in range(len(mistake_scores)):
+            mistake_scores[i] += temp
+        
+        module_question_lens += round_preserving_sum([mistake_score * question_len / (mistake_scores_sum * 2) for mistake_score in mistake_scores])
+    except Exception as e:
+        print('Error: cannot retrieve questions from database.', e)
+    finally:
+        mongo_client.close()
+
+    prompt_template1 = (
+        "You are an intelligent assistant tasked with generating a personalized multiple-choice questions (MCQs) to help reduce a user's knowledge gaps.\n"
+        "Based on the list of questions the user answered incorrectly, generate **exactly {question_num} related questions** by using context.\n"
+        "* Constraints: *\n"
+        "- Generate exactly {question_num} MCQs based on the module content.\n"
+        "- Generated questions have to be conceptually or thematically related to the incorrectly answered ones.\n"
+        "- Do not copy the questions from questions database.\n"
+        "- Each question should have four options labeled a), b), c), and d).\n"
+        "- Only one option should be correct.\n"
+        "- Provide the correct answer after each question.\n"
+        "- Questions can be paraphrased or have similarities.\n\n"
+        "* Format: *\n"
+        "1. [Question text]\n"
+        "a) [Option A]\n"
+        "b) [Option B]\n"
+        "c) [Option C]\n"
+        "d) [Option D]\n"
+        "Answer: [a/b/c/d]\n\n"
+        "2. [Question text]\n"
+        "a) [Option A]\n"
+        "b) [Option B]\n"
+        "c) [Option C]\n"
+        "d) [Option D]\n"
+        "Answer: [a/b/c/d]\n\n"
+        "* Module Content: *\n{context}\n\n"
+        "* User's incorrectly answered questions: *\n{incorrecty_answered_questions}\n"
+        "* Available questions in the database: *\n{questions}"
+    )
+    prompt_template2 = (
+        "You are an intelligent assistant tasked with generating a personalized multiple-choice questions (MCQs) to help reduce a user's knowledge gaps.\n"
+        "Based on the context, generate **exactly {question_num} related questions** by using context.\n"
+        "* Constraints: *\n"
+        "- Generate exactly {question_num} MCQs based on the module content.\n"
+        "- Do not copy the questions from questions database.\n"
+        "- Each question should have four options labeled a), b), c), and d).\n"
+        "- Only one option should be correct.\n"
+        "- Provide the correct answer after each question.\n"
+        "- Questions can be paraphrased or have similarities.\n\n"
+        "* Format: *\n"
+        "1. [Question text]\n"
+        "a) [Option A]\n"
+        "b) [Option B]\n"
+        "c) [Option C]\n"
+        "d) [Option D]\n"
+        "Answer: [a/b/c/d]\n\n"
+        "2. [Question text]\n"
+        "a) [Option A]\n"
+        "b) [Option B]\n"
+        "c) [Option C]\n"
+        "d) [Option D]\n"
+        "Answer: [a/b/c/d]\n\n"
+        "* Module Content: *\n{context}\n\n"
+        "* Available questions in the database: *\n{questions}"
+    )
+
+    for i, module in enumerate(course['modules']):
+        prompt = ''
+        question_db_text = ''
+        for j, question in enumerate(module['questions'], 1):
+            question_text = str(j) + '. ' + question['question'] + '\n'
+            option_text = '\n'.join(key + ') ' + value for key, value in question['options'].items())
+            question_db_text += question_text + option_text + '\n\n'
+
+        if mistake_questions[i] == []:
+            prompt = ChatPromptTemplate.from_template(prompt_template2).format(
+                question_num=module_question_lens[i],
+                context=module['content'],
+                questions=question_db_text
+            )
+        else:
+            incorrecty_answered_questions_text = ''
+            for question_id in mistake_questions[i]:
+                question_text = str(question_id+1) + '. ' + module['questions'][question_id]['question'] + '\n'
+                option_text = '\n'.join(key + ') ' + value for key, value in module['questions'][question_id]['options'].items())
+                incorrecty_answered_questions_text += question_text + option_text + '\n\n'
+            
+            prompt = ChatPromptTemplate.from_template(prompt_template1).format(
+                question_num=module_question_lens[i],
+                context=module['content'],
+                incorrecty_answered_questions=incorrecty_answered_questions_text,
+                questions=question_db_text
+            )
+        
+        response = get_model_response(prompt)
+        result += parse_questions(response)
+    
+    try:
+        mongo_client = MongoClient(MONGO_URI)
+        mongo_db = mongo_client[MONGO_DB_NAME]
+
+        final_quizzes_collection = mongo_db['final_quizzes']
+        insert_result = final_quizzes_collection.insert_one({
+            'course_id': course_id,
+            'user_id': user_id,
+            'questions': result
+        })
+        return insert_result.inserted_id
+    except Exception as e:
+        print('Error: cannot insert final quiz into database.', e)
+    finally:
+        mongo_client.close()
+
+
+if __name__ == '__main__':
+    generate_final_quiz('6829e8d84685438e1e3daaf0', 'AzimZen')

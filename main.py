@@ -6,7 +6,7 @@ from sse_starlette.sse import EventSourceResponse
 from chatbot import ChatBot, sessions
 
 from generate_course import generate_course
-from generate_quiz import generate_module_quiz as gen_module_quiz
+from generate_quiz import generate_module_quiz as gen_module_quiz, generate_final_quiz as gen_final_quiz
 from delete_course import delete_course as del_course
 
 
@@ -82,8 +82,24 @@ async def generate_module_quiz(
         raise HTTPException(status_code=500, detail=str(e))
     
     if quiz_id is None:
-        raise HTTPException(status_code=404, detail='Invalid attempt_id.')
+        raise HTTPException(status_code=400, detail='User didn\'t finished all quizzes.')
     return {'message': 'New quiz has been successfully generated.', 'quiz_id': str(quiz_id)}
+
+
+@app.post("/generate-final-quiz")
+async def generate_final_quiz(
+    course_id: str = Form(...),
+    user_id: str = Form(...)
+):
+    quiz_id = None
+    try:
+        quiz_id = gen_final_quiz(course_id, user_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    if quiz_id is None:
+        raise HTTPException(status_code=404, detail='Invalid attempt_id.')
+    return {'message': 'Final quiz has been successfully generated.', 'quiz_id': str(quiz_id)}
 
 
 bot = ChatBot()
