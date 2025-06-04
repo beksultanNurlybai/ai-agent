@@ -117,6 +117,11 @@ def send_message(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/get-history")
+def get_history(session_id: str = Form(...)):
+    history = bot.get_memory_history(session_id)
+    return {'message': 'Conversation history has been successfully sent.', 'history': history}
+
 
 @app.post("/close-session")
 def close_session(session_id: str = Form(...)):

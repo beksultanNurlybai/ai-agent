@@ -8,9 +8,8 @@ from langchain_qdrant import QdrantVectorStore
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.chat_message_histories import ChatMessageHistory
-from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.runnables import RunnableLambda
+from langchain_core.messages import HumanMessage
 from dotenv import load_dotenv
 
 
@@ -30,13 +29,7 @@ class ChatBot:
     def __init__(self):
         self.llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", google_api_key=GEMINI_API_KEY)
         self.embedding = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-
-        self.chain = RunnableWithMessageHistory(
-            RunnableLambda(lambda inputs: self.llm.invoke(inputs["input"])),
-            get_session_history=self._get_history_for_session,
-            input_messages_key="input",
-            history_messages_key="history"
-        )
+    
     
     def _get_history_for_session(self, session_id: str) -> BaseChatMessageHistory:
         if session_id not in sessions:
@@ -104,6 +97,7 @@ class ChatBot:
             client.close()
             mongo_client.close()
     
+
     def process_message(self, session_id: str, message: str) -> str:
         user = sessions.get(session_id, {}).get("user", None)
         course = sessions.get(session_id, {}).get("course", None)
@@ -111,20 +105,39 @@ class ChatBot:
         if user is None or course is None:
             return None
 
+        history = sessions[session_id]["history"]
+        messages = history.messages.copy()
+
+        messages.append(HumanMessage(content=message))
+
         context = self._retrieve_context(message, user, course)
+        if context:
+            context_msg = f"Context for this conversation:\n{context}\n\n"
+            messages.insert(0, HumanMessage(content=context_msg))
 
-        prompt = (
-            f"Context for this conversation:\n{context}\n\n"
-            f"User: {message}\n"
-            f"Assistant:"
-        )
+        response = self.llm.invoke(messages)
 
-        response = self.chain.invoke(
-            {"input": prompt},
-            config={"configurable": {"session_id": session_id}}
-        )
+        history.add_user_message(message)
+        history.add_ai_message(response.content)
 
         return response.content
+
+    
+    def get_memory_history(self, session_id: str) -> dict:
+        history = sessions.get(session_id, {}).get("history", None)
+        if history is None:
+            return {'Human': [], 'AI': []}
+
+        human_messages = []
+        ai_messages = []
+
+        for msg in history.messages:
+            if msg.type == "human":
+                human_messages.append(msg.content)
+            elif msg.type == "ai":
+                ai_messages.append(msg.content)
+
+        return {'Human': human_messages, 'AI': ai_messages}
 
     def close_session(self, session_id: str) -> None:
         if session_id in sessions:
@@ -135,16 +148,17 @@ if __name__ == "__main__":
     bot = ChatBot()
     
     session_id = "123456"
-    bot.create_session(session_id, user="Beksultan", course="Attention")
+    course_id = "6829e8d84685438e1e3daaf0"
+    bot.create_session(session_id, course_id)
     
     queries = [
         "Hi",
-        "What is a transformer?"
+        "What is a transformer?",
+        "What is a meaning of life?"
     ]
     
     for query in queries:
-        print(f"User: {query}")
         response = bot.process_message(session_id, query)
-        print(f"Assistant: {response}\n")
     
+    print(bot.get_memory_history(session_id))
     bot.close_session(session_id)
