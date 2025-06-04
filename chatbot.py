@@ -1,5 +1,6 @@
 import os
 from typing import Dict, Any
+from bson import ObjectId
 from pymongo import MongoClient
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Filter, FieldCondition, MatchValue
@@ -42,12 +43,33 @@ class ChatBot:
             sessions[session_id] = {"history": ChatMessageHistory()}
         return sessions[session_id]["history"]
 
-    def create_session(self, session_id: str, user: str, course: str) -> None:
-        sessions[session_id] = {
-            "user": user,
-            "course": course,
-            "history": ChatMessageHistory()
-        }
+    def create_session(self, session_id: str, course_id: str) -> str:
+        try:
+            mongo_client = MongoClient(MONGO_URI)
+            mongo_db = mongo_client[MONGO_DB_NAME]
+            courses_collection = mongo_db['courses']
+            
+            if not ObjectId.is_valid(course_id):
+                return None
+            
+            course_data = courses_collection.find_one(
+                {'_id': ObjectId(course_id)},
+                {'_id': 0, 'creator_username': 1, 'title': 1}
+            )
+
+            if course_data is None:
+                return None
+            
+            sessions[session_id] = {
+                "user": course_data['creator_username'],
+                "course": course_data['title'],
+                "history": ChatMessageHistory()
+            }
+            return session_id
+        except Exception as e:
+            print('Error: cannot retrieve quiz attempt from database.', e)
+        finally:
+            mongo_client.close()
     
     def _retrieve_context(self, query: str, user: str, course: str) -> str:
         try:
@@ -83,8 +105,11 @@ class ChatBot:
             mongo_client.close()
     
     def process_message(self, session_id: str, message: str) -> str:
-        user = sessions.get(session_id, {}).get("user", "unknown")
-        course = sessions.get(session_id, {}).get("course", "unknown")
+        user = sessions.get(session_id, {}).get("user", None)
+        course = sessions.get(session_id, {}).get("course", None)
+
+        if user is None or course is None:
+            return None
 
         context = self._retrieve_context(message, user, course)
 

@@ -6,6 +6,7 @@ from sse_starlette.sse import EventSourceResponse
 from chatbot import ChatBot, sessions
 
 from generate_course import generate_course
+from generate_quiz import generate_module_quiz as gen_module_quiz
 from delete_course import delete_course as del_course
 
 
@@ -70,15 +71,35 @@ async def delete_course(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/generate-module-quiz")
+async def generate_module_quiz(
+    attempt_id: str = Form(...)
+):
+    new_attempt_id = None
+    try:
+        new_attempt_id = gen_module_quiz(attempt_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    if new_attempt_id is None:
+        raise HTTPException(status_code=404, detail='Invalid attempt_id.')
+    return {'message': 'New quiz attempt has been successfully generated.', 'new_attempt_id': str(new_attempt_id)}
+
+
 bot = ChatBot()
 
 @app.post("/start-session")
 def start_session(
-    title: str = Form(...),
-    owner: str = Form(...)
+    course_id: str = Form(...)
 ):
-    session_id = str(uuid4())
-    bot.create_session(session_id, user=owner, course=title)
+    session_id = None
+    try:
+        session_id = bot.create_session(str(uuid4()), course_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    if session_id == None:
+        raise HTTPException(status_code=404, detail='Invalid course_id.')
     return {"session_id": session_id}
 
 
@@ -89,8 +110,12 @@ def send_message(
 ):
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found")
-    response = bot.process_message(session_id, message)
-    return {"response": response}
+    
+    try:
+        response = bot.process_message(session_id, message)
+        return {"response": response}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/close-session")
